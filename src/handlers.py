@@ -2,12 +2,12 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
-from states import UserProfile
+from states import UserProfile, FoodInfo
 from utils import calculate_calories_norm, calculate_water_norm
 
 from utils import CALORIES_PER_MINUTE
 
-from api_srvices import get_temperature
+from api_srvices import get_temperature, get_food_info
 
 router = Router()
 
@@ -17,7 +17,10 @@ async def cmd_help(message: Message):
     await message.reply(
         "Available Commands:\n"
         "/set_profile - Set up your profile info \n"
-        "/check_pregress - Check current progress'n"
+        "/check_pregress - Check current progress\n"
+        "/log_water <number of ml> log drunk water\n"
+        "/log_food <food name> log written food, calcukate calories\n"
+        "/log_workout <workout name> <workout duration in minutes> log workout\n" 
     )
 
 # Handler of /set_profile
@@ -145,7 +148,7 @@ async def cmd_log_water(message: Message):
     parts = message.text.split(maxsplit=1)
 
     if len(parts) < 2:
-        await message.answer("Please provide the number of water. Usage: /log_water <number of ml>")
+        await message.answer("Invalid input. Usage: /log_water <number of ml>")
         return
     
     user_id = message.from_user.id
@@ -169,7 +172,7 @@ async def cmd_log_workout(message: Message):
     
     parts = message.text.split()
     if len(parts) != 3:
-        await message.answer("Please provide the number of water. Usage: /log_workout <workout> <time in minutes>")
+        await message.answer("Invalid input. Usage: /log_workout <workout> <time in minutes>")
         return
     
     user_id = message.from_user.id
@@ -203,5 +206,62 @@ async def cmd_log_workout(message: Message):
     return
     
 @router.message(Command("log_food"))
-async def cmd_log_workout(message: Message):
-    pass
+async def cmd_log_workout(message: Message, state: FSMContext):
+
+    user_id = message.from_user.id
+    users = router.users
+    if user_id not in users:
+        await message.reply("Your profile has not been set yet.")
+        return
+    
+    user_data = users[user_id]
+
+    parts = message.text.split()
+
+    if len(parts) != 2:
+        await message.reply("Your profile has not been set yet.")
+        return
+    
+    food_query = parts[1]
+
+    food_ans = await get_food_info(food_query)
+
+    if food_ans is None:
+        await message.reply("Food could not be found in th databse.")
+        return
+
+    food_name, calories, metric_serving_amount, metric_unit = food_ans
+
+    user_data['last_food'] = food_name
+    user_data['last_food_calories'] = float(calories)
+    user_data['last_food_unit'] = metric_unit
+    user_data['last_food_serving_amount'] = float(metric_serving_amount)
+
+    await message.reply(f"{food_name} - {calories} kcal per {metric_serving_amount} {metric_unit}.\n"
+                        f"Please provide amount eaten in  {metric_unit} units.")
+    
+    await state.set_state(FoodInfo.amount)
+
+@router.message(FoodInfo.amount)
+async def process_food_amount(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    users = router.users
+    if user_id not in users:
+        await message.reply("Your profile has not been set yet.")
+        return
+    user_data = users[user_id]
+
+    amount = message.text
+    try: 
+        amount = int(amount)
+
+        calories = user_data['last_food_calories'] 
+        metric_serving_amount = user_data['last_food_serving_amount']
+        calories = int(amount * calories / metric_serving_amount)
+
+        user_data['logged_calories'] += calories
+        await message.answer(f"Written {calories} kcal.")
+
+        state.clear()
+    except ValueError:
+        await message.answer("Please enter whole number for the unit amount")

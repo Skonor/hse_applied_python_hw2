@@ -6,3 +6,6 @@ class UserProfile(StatesGroup):
     age = State()
     minutes_active = State()
     city = State()
+
+class FoodInfo(StatesGroup):
+    amount = State()
